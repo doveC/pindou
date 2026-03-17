@@ -21,6 +21,12 @@
             display: none;
         }
 
+        #viewCanvasScroller {
+            overflow-y: auto;
+            overflow-x: hidden;
+            max-width: 100%;
+        }
+
         .colorBlock {
             display: inline-block;
             width: 24px;
@@ -251,7 +257,9 @@
                 </div>
             </div>
             <div class="card-body" style='padding: 0;'>
-                <canvas id="viewCanvas"></canvas>
+                <div id="viewCanvasScroller">
+                    <canvas id="viewCanvas"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -416,13 +424,14 @@
 
     var scrollbarWidth = getScrollbarWidth();
 
-    var originalCanvas, fullCanvas, viewCanvas;
+    var originalCanvas, fullCanvas, viewCanvas, viewCanvasScroller;
     var rulerX1Canvas, rulerX2Canvas, rulerY1Canvas, rulerY2Canvas;//四个标尺的canvas
 
     $().ready(function () {
         originalCanvas = document.getElementById('originalCanvas');//原始图片canvas
         fullCanvas = document.getElementById('fullCanvas');//完整图片canvas
         viewCanvas = document.getElementById('viewCanvas');//视图（可拖拽点击）canvas
+        viewCanvasScroller = document.getElementById('viewCanvasScroller');
 
         //显示调色板选色器
         generateColorSelectorHtml();
@@ -1641,9 +1650,12 @@
 
     //使canvas的尺寸与屏幕大小一致并且不超过当前大图尺寸
     function resizeViewCanvasFitWindow() {
+        let maxVisibleHeight = Math.max($(window).height() - 8, (pixelSize + 1) * 4);
+        viewCanvasScroller.style.maxHeight = maxVisibleHeight + 'px';
+
         if (!currentSliceImage) {//使用完整图的尺寸
             viewCanvas.width = Math.min($(window).width() - scrollbarWidth - 4, (originalCanvas.width + 2) * (pixelSize + 1));
-            viewCanvas.height = Math.min($(window).height() - 8, (originalCanvas.height + 2) * (pixelSize + 1));
+            viewCanvas.height = (originalCanvas.height + 2) * (pixelSize + 1);
         }
         else//使用单个图块的尺寸
         {

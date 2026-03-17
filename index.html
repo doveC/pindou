@@ -326,7 +326,7 @@
                     <p>
                         <ul>
                             <li>可以上传本地图片，将每个像素转换成为相近颜色的拼豆并放大，供实际拼豆时参考；</li>
-                            <li>图片限制尺寸为500x500，建议使用PNG格式；</li>
+                            <li>支持上传任意尺寸图片，建议优先使用PNG格式，超大图片处理时间会更长；</li>
                             <li>可以将图片切分成不同尺寸的图块，点击上方图块或全图可以切换放大部分；</li>
                             <li>大图上方的“颜色统计”按钮可以查看所有颜色的拼豆数量；</li>
                             <li>可以只显示某种颜色用于快速摆放拼豆，一种方式是点击大图上的像素在弹出对话框中操作，另一种是在颜色统计按钮中直接点击颜色旁边的&lt;&lt;按钮；</li>
@@ -375,8 +375,7 @@
 <script type="text/javascript">
     const pixelSize = 20,//马赛克像素尺寸（放大倍数）
         dragMinTimeSpan = 20,//拖拽所需的鼠标按下最小时间间隔（ms）
-        dragMinDistance = 8,//拖拽所需的鼠标移动最小距离（像素）
-        imageSizeLimit = 500;//图片尺寸大小限制
+        dragMinDistance = 8;//拖拽所需的鼠标移动最小距离（像素）
 
     var pieceSize = 40;//单块拼板容纳的拼豆数
     var targetPatternSize = 0,//目标拼豆图尺寸，0表示保持原始尺寸
@@ -454,10 +453,6 @@
                     var image = new Image();
                     image.src = e.target.result;
                     image.onload = function (e) {
-                        if (this.width > imageSizeLimit || this.height > imageSizeLimit) {
-                            alert('图片分辨率' + this.width + 'x' + this.height + '过大，需小于' + imageSizeLimit + 'x' + imageSizeLimit);
-                            return;
-                        }
                         uploadedImage = this;
                         processUploadedImage();
                     }

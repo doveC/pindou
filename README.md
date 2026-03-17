@@ -7,7 +7,7 @@
 
 操作指南：
 - 可以上传本地图片，将每个像素转换成为相近颜色的拼豆并放大，供实际拼豆时参考；
-- 图片限制尺寸为500x500，建议使用PNG格式；
+- 支持上传任意尺寸图片，建议使用PNG格式；超大图片在浏览器中处理时间会更长；
 - 可以将图片切分成不同尺寸的图块，点击上方图块或全图可以切换放大部分；
 - 大图上方的“颜色统计”按钮可以查看所有颜色的拼豆数量；
 - 可以只显示某种颜色用于快速摆放拼豆，一种方式是点击大图上的像素在弹出对话框中操作，另一种是在颜色统计按钮中直接点击颜色旁边的<<按钮；
@@ -30,7 +30,7 @@ This web tool is a helper for making fuse beads. It builds on HTML5+JS so can us
 
 User guide:
 - Upload local image, each pixel will convert to similar color of beads and zoom in for your consult.
-- Image size limit is 500x500, strongly recommend PNG format than JPEG.
+- Support uploading images of any size, and PNG is still recommended. Very large images may take longer to process in the browser.
 - Image will be cut into smaller size pieces. Click piece or full image to swap the large image shown.
 - "Color count" button on toolbar used to show each count of colors.
 - Two way to show some color only: click the large pixel to show a dialog; or press the << on "Color count" button.

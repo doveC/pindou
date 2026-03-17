@@ -114,6 +114,42 @@
                         </select>
                     </div>
                 </div>
+                <div class="form-group">
+                    <div class="row">
+                        <label class="col-sm-2 col-form-label">目标尺寸：</label>
+                        <select id="patternSizeSelect" class="form-control col-sm-4">
+                            <option value="0" selected>原始尺寸</option>
+                            <option value="32">32x32</option>
+                            <option value="40">40x40</option>
+                            <option value="50">50x50</option>
+                            <option value="64">64x64</option>
+                            <option value="80">80x80</option>
+                            <option value="100">100x100</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
+                        <label class="col-sm-2 col-form-label">缩放方式：</label>
+                        <select id="resizeModeSelect" class="form-control col-sm-4">
+                            <option value="fit" selected>等比适配</option>
+                            <option value="stretch">强制尺寸</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
+                        <label class="col-sm-2 col-form-label">颜色优化：</label>
+                        <select id="colorLimitSelect" class="form-control col-sm-4">
+                            <option value="0" selected>保留全部颜色</option>
+                            <option value="8">自动压到8色以内</option>
+                            <option value="12">自动压到12色以内</option>
+                            <option value="16">自动压到16色以内</option>
+                            <option value="24">自动压到24色以内</option>
+                            <option value="32">自动压到32色以内</option>
+                        </select>
+                    </div>
+                </div>
             </form>
         </div>
     </div>
@@ -343,12 +379,19 @@
         imageSizeLimit = 500;//图片尺寸大小限制
 
     var pieceSize = 40;//单块拼板容纳的拼豆数
+    var targetPatternSize = 0,//目标拼豆图尺寸，0表示保持原始尺寸
+        resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
+        autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象
         similarColorCache = new Map(),//与实际颜色最相近的调色板颜色缓存
         paletteImageData = new Array(),//存储原始图片替换调色板颜色后的原图
         sliceImages = new Array(),//存储所有切块图的二维数组
         currentSliceImage = null;//当前显示的切块图位置（显示全图时为null）
+
+    var uploadedImage = null,//原始上传图片对象，用于重新处理
+        paletteColorCountBeforeReduction = 0,//自动减色前的颜色数
+        paletteColorCountAfterReduction = 0;//自动减色后的颜色数
 
     var selectedPixel = null,//当前选中的像素点（x,y,color)
         filterColor = '',//颜色筛选（只显示此颜色的色块）
@@ -373,12 +416,13 @@
 
     var scrollbarWidth = getScrollbarWidth();
 
+    var originalCanvas, fullCanvas, viewCanvas;
     var rulerX1Canvas, rulerX2Canvas, rulerY1Canvas, rulerY2Canvas;//四个标尺的canvas
 
     $().ready(function () {
-        var originalCanvas = document.getElementById('originalCanvas'),//原始图片canvas
-            fullCanvas = document.getElementById('fullCanvas'),//完整图片canvas
-            viewCanvas = document.getElementById('viewCanvas');//视图（可拖拽点击）canvas
+        originalCanvas = document.getElementById('originalCanvas');//原始图片canvas
+        fullCanvas = document.getElementById('fullCanvas');//完整图片canvas
+        viewCanvas = document.getElementById('viewCanvas');//视图（可拖拽点击）canvas
 
         //显示调色板选色器
         generateColorSelectorHtml();
@@ -414,36 +458,8 @@
                             alert('图片分辨率' + this.width + 'x' + this.height + '过大，需小于' + imageSizeLimit + 'x' + imageSizeLimit);
                             return;
                         }
-                        showLoadingMask(() => {
-                            //重加载图片后的完整操作步骤：
-                            //清空缓存和各种信息
-                            similarColorCache = new Map();
-                            paletteImageData = new Array();
-                            sliceImages = new Array();
-                            currentSliceImage = null;
-                            largeCanvasOffsetX = 0;
-                            largeCanvasOffsetY = 0;
-                            colorReplaceList = new Map();
-                            pixelColorReplaceList = new Map();
-                            refreshColorReplaceList();
-
-                            $('#mainContent').show();
-
-                            let originalCtx = originalCanvas.getContext('2d');
-                            originalCtx.clearRect(0, 0, originalCanvas.width, originalCanvas.height);
-                            //绘制原图
-                            originalCanvas.width = this.width;
-                            originalCanvas.height = this.height;
-                            originalCtx.drawImage(this, 0, 0);
-                            //切掉原图白色和透明边
-                            trimCanvas(originalCanvas);
-                            //将原图颜色换成最相近的调色板颜色
-                            toPaletteColor(originalCanvas, fullCanvas);
-                            //将完整图片切成图块
-                            sliceCanvasToImage(fullCanvas, 'sliceImageContainer');
-                            //显示完整图片对应的马赛克大图
-                            showFullImageView();
-                        });
+                        uploadedImage = this;
+                        processUploadedImage();
                     }
                     // 清空图片上传框的值
                     imageChooser.value = '';
@@ -458,27 +474,8 @@
                     paletteMap = generatePaletteMap(allPalettes.get(this.value));//重新加载调色板
                     //刷新调色板选色器   
                     generateColorSelectorHtml();
-                    if (!$('#mainContent').is(':hidden')) {
-                        showLoadingMask(() => {
-                            //刷新调色板的完整操作步骤：
-                            //清空缓存和各种信息
-                            similarColorCache = new Map();
-                            paletteImageData = new Array();
-                            sliceImages = new Array();
-                            currentSliceImage = null;
-                            largeCanvasOffsetX = 0;
-                            largeCanvasOffsetY = 0;
-                            colorReplaceList = new Map();
-                            pixelColorReplaceList = new Map();
-                            refreshColorReplaceList();
-
-                            //将原图颜色换成最相近的调色板颜色
-                            toPaletteColor(originalCanvas, fullCanvas);
-                            //将完整图片切成图块
-                            sliceCanvasToImage(fullCanvas, 'sliceImageContainer');
-                            //显示完整图片对应的马赛克大图
-                            showFullImageView();
-                        });
+                    if (uploadedImage) {
+                        processUploadedImage();
                     }
                 }
             });
@@ -491,6 +488,30 @@
                         resizeViewCanvasFitWindow();
                         refreshImage();
                     }
+                }
+            });
+
+            //目标拼豆尺寸变化
+            $('#patternSizeSelect').change(function (e) {
+                targetPatternSize = parseInt(this.value) || 0;
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //缩放方式变化
+            $('#resizeModeSelect').change(function (e) {
+                resizeMode = this.value || 'fit';
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //自动减色变化
+            $('#colorLimitSelect').change(function (e) {
+                autoColorLimit = parseInt(this.value) || 0;
+                if (uploadedImage) {
+                    processUploadedImage();
                 }
             });
 
@@ -770,6 +791,94 @@
         $('#colorModal').modal('show');
     }
 
+    function resetProcessingState() {
+        similarColorCache = new Map();
+        paletteImageData = new Array();
+        sliceImages = new Array();
+        currentSliceImage = null;
+        largeCanvasOffsetX = 0;
+        largeCanvasOffsetY = 0;
+        selectedPixel = null;
+        filterColor = '';
+        colorReplaceList = new Map();
+        pixelColorReplaceList = new Map();
+        isBrushMode = false;
+        brushColor = '';
+        paletteColorCountBeforeReduction = 0;
+        paletteColorCountAfterReduction = 0;
+        $('#brushInfo').html('');
+        $('#brushToolBar').hide();
+        refreshColorReplaceList();
+    }
+
+    function processUploadedImage() {
+        if (!uploadedImage) return;
+
+        showLoadingMask(() => {
+            resetProcessingState();
+            $('#mainContent').show();
+
+            let processedCanvas = createProcessedSourceCanvas(uploadedImage);
+            copyCanvas(processedCanvas, originalCanvas);
+            toPaletteColor(originalCanvas, fullCanvas);
+            sliceCanvasToImage(fullCanvas, 'sliceImageContainer');
+            showFullImageView();
+        });
+    }
+
+    function createProcessedSourceCanvas(image) {
+        let tempCanvas = document.createElement('canvas'),
+            tempCtx = tempCanvas.getContext('2d');
+        tempCanvas.width = image.width;
+        tempCanvas.height = image.height;
+        tempCtx.drawImage(image, 0, 0);
+
+        trimCanvas(tempCanvas);
+        return resizeCanvasForBeads(tempCanvas);
+    }
+
+    function copyCanvas(sourceCanvas, destCanvas) {
+        destCanvas.width = sourceCanvas.width;
+        destCanvas.height = sourceCanvas.height;
+        let destCtx = destCanvas.getContext('2d');
+        destCtx.drawImage(sourceCanvas, 0, 0);
+    }
+
+    function resizeCanvasForBeads(sourceCanvas) {
+        if (!targetPatternSize) return sourceCanvas;
+
+        let sourceWidth = sourceCanvas.width,
+            sourceHeight = sourceCanvas.height,
+            targetWidth = sourceWidth,
+            targetHeight = sourceHeight;
+
+        if (resizeMode == 'stretch') {
+            targetWidth = targetPatternSize;
+            targetHeight = targetPatternSize;
+        }
+        else {
+            let scale = targetPatternSize / Math.max(sourceWidth, sourceHeight);
+            targetWidth = Math.max(1, Math.round(sourceWidth * scale));
+            targetHeight = Math.max(1, Math.round(sourceHeight * scale));
+        }
+
+        if (targetWidth == sourceWidth && targetHeight == sourceHeight) {
+            return sourceCanvas;
+        }
+
+        let resizedCanvas = document.createElement('canvas'),
+            resizedCtx = resizedCanvas.getContext('2d');
+        resizedCanvas.width = targetWidth;
+        resizedCanvas.height = targetHeight;
+        resizedCtx.imageSmoothingEnabled = true;
+        if ('imageSmoothingQuality' in resizedCtx) {
+            resizedCtx.imageSmoothingQuality = 'high';
+        }
+        resizedCtx.drawImage(sourceCanvas, 0, 0, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
+
+        return resizedCanvas;
+    }
+
     //获取全图指定坐标点对应的图片色值
     function getFullCanvasColor(x, y) {
         //根据当前显示的是全图还是切块，读取坐标所在rgb数据
@@ -817,6 +926,8 @@
             }
         }
 
+        if (bound.top > bound.bottom || bound.left > bound.right) return;
+
         //取出裁剪图片的宽高
         let trimHeight = bound.bottom - bound.top + 1,
             trimWidth = bound.right - bound.left + 1,
@@ -855,13 +966,117 @@
             imageData.data[i + 3] = 255;//处理后一律变成不透明色
         }
 
+        applyAutoColorLimit(imageData);
+
         //保存换色后的原图
         paletteImageData = imageData;
 
-        similarColorCache = null;
+        similarColorCache = new Map();
         destCanvas.width = sourceCanvas.width;
         destCanvas.height = sourceCanvas.height;
         destCtx.putImageData(imageData, 0, 0);
+    }
+
+    function countImageColors(imageData) {
+        let colorMap = new Map();
+
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i + 3] == 0) continue;
+
+            let hex = rgbToHex(imageData.data[i], imageData.data[i + 1], imageData.data[i + 2]);
+            if (colorMap.has(hex)) colorMap.set(hex, colorMap.get(hex) + 1);
+            else colorMap.set(hex, 1);
+        }
+
+        return colorMap;
+    }
+
+    function resolveMergedColor(mergeMap, colorHex) {
+        while (mergeMap.has(colorHex)) {
+            colorHex = mergeMap.get(colorHex);
+        }
+        return colorHex;
+    }
+
+    function applyAutoColorLimit(imageData) {
+        let colorMap = countImageColors(imageData);
+        paletteColorCountBeforeReduction = colorMap.size;
+
+        if (!autoColorLimit || colorMap.size <= autoColorLimit) {
+            paletteColorCountAfterReduction = colorMap.size;
+            return;
+        }
+
+        let workingColorMap = new Map(colorMap),
+            mergeMap = new Map();
+
+        while (workingColorMap.size > autoColorLimit) {
+            let sourceColorHex = null,
+                sourceCount = Number.MAX_SAFE_INTEGER;
+
+            for (let [hex, count] of workingColorMap) {
+                if (count < sourceCount) {
+                    sourceColorHex = hex;
+                    sourceCount = count;
+                }
+            }
+
+            if (!sourceColorHex) break;
+
+            let sourceColor = paletteMap.get(sourceColorHex),
+                nearestColorHex = null,
+                nearestColorDistance = Number.MAX_SAFE_INTEGER,
+                nearestColorCount = -1;
+
+            for (let [candidateHex, candidateCount] of workingColorMap) {
+                if (candidateHex == sourceColorHex) continue;
+
+                let candidateColor = paletteMap.get(candidateHex);
+                if (!sourceColor || !candidateColor) continue;
+
+                let distance = colorDistance(sourceColor.r, sourceColor.g, sourceColor.b, candidateColor.r, candidateColor.g, candidateColor.b);
+                if (distance < nearestColorDistance
+                    || (distance == nearestColorDistance && candidateCount > nearestColorCount)) {
+                    nearestColorHex = candidateHex;
+                    nearestColorDistance = distance;
+                    nearestColorCount = candidateCount;
+                }
+            }
+
+            if (!nearestColorHex) break;
+
+            let finalTargetHex = resolveMergedColor(mergeMap, nearestColorHex);
+            mergeMap.set(sourceColorHex, finalTargetHex);
+            workingColorMap.set(finalTargetHex, workingColorMap.get(finalTargetHex) + sourceCount);
+            workingColorMap.delete(sourceColorHex);
+        }
+
+        if (mergeMap.size == 0) {
+            paletteColorCountAfterReduction = colorMap.size;
+            return;
+        }
+
+        let rgbCache = new Map();
+        for (let i = 0; i < imageData.data.length; i += 4) {
+            if (imageData.data[i + 3] == 0) continue;
+
+            let sourceHex = rgbToHex(imageData.data[i], imageData.data[i + 1], imageData.data[i + 2]),
+                targetHex = resolveMergedColor(mergeMap, sourceHex);
+            if (sourceHex == targetHex) continue;
+
+            let targetRgb = rgbCache.get(targetHex);
+            if (!targetRgb) {
+                targetRgb = hexToRgb(targetHex);
+                rgbCache.set(targetHex, targetRgb);
+            }
+
+            imageData.data[i] = targetRgb.r;
+            imageData.data[i + 1] = targetRgb.g;
+            imageData.data[i + 2] = targetRgb.b;
+            imageData.data[i + 3] = 255;
+        }
+
+        paletteColorCountAfterReduction = countImageColors(imageData).size;
     }
 
     //将canvas分割为小图并输出为可点击的image集合
@@ -1030,6 +1245,10 @@
         let infoHtml = currentSliceImage ?
             "图块(" + (currentSliceImage.y + 1) + "," + (currentSliceImage.x + 1) + ") ,(" + pieceSize + "x" + pieceSize + ")"
             : "全图(" + fullCanvas.width + "x" + fullCanvas.height + ")";
+        infoHtml += "，全图颜色" + paletteColorCountAfterReduction + "种";
+        if (paletteColorCountBeforeReduction > paletteColorCountAfterReduction) {
+            infoHtml += "（自动合并前" + paletteColorCountBeforeReduction + "种）";
+        }
         if (filterColor) {
             infoHtml += "(只显示<div class='colorBlock' style='background:#" + filterColor + ";color:" + getFontColor(filterColor) + ";'>"
                 + paletteMap.get(filterColor).name + "</div>, 点击大图显示全部)";

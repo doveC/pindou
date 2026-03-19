@@ -255,6 +255,9 @@
                     <label id='brushInfo'></label>
                     <button type="button" class="btn btn-danger" id="disableBrushMode">退出</button>
                 </div>
+                <div class="float-right mx-2">
+                    <button type="button" class="btn btn-outline-success" id="downloadPattern">下载图纸</button>
+                </div>
             </div>
             <div class="card-body" style='padding: 0;'>
                 <div id="viewCanvasScroller">
@@ -571,6 +574,11 @@
                 brushColor = '';
                 $('#brushInfo').html('');
                 $('#brushToolBar').hide();
+            });
+
+            //下载图纸
+            $('#downloadPattern').on('click tap', function (e) {
+                downloadPatternImage();
             });
 
             //关闭颜色对话框
@@ -1373,6 +1381,63 @@
         viewCtx.moveTo(viewCanvas.width - (pixelSize + 1) - 0.5, 0);
         viewCtx.lineTo(viewCanvas.width - (pixelSize + 1) - 0.5, viewCanvas.height);
         viewCtx.stroke();
+    }
+
+    function drawExportRulerBorders(ctx, width, height) {
+        ctx.beginPath();
+        ctx.moveTo(0, pixelSize + 1 - 0.5);
+        ctx.lineTo(width, pixelSize + 1 - 0.5);
+        ctx.stroke();
+        ctx.moveTo(0, height - (pixelSize + 1) - 0.5);
+        ctx.lineTo(width, height - (pixelSize + 1) - 0.5);
+        ctx.stroke();
+        ctx.moveTo(pixelSize + 1 - 0.5, 0);
+        ctx.lineTo(pixelSize + 1 - 0.5, height);
+        ctx.stroke();
+        ctx.moveTo(width - (pixelSize + 1) - 0.5, 0);
+        ctx.lineTo(width - (pixelSize + 1) - 0.5, height);
+        ctx.stroke();
+    }
+
+    function buildExportCanvas() {
+        if (!largeCanvas || !rulerX1Canvas || !rulerX2Canvas || !rulerY1Canvas || !rulerY2Canvas) return null;
+
+        let rulerSize = pixelSize + 1,
+            exportCanvas = document.createElement('canvas'),
+            exportCtx = exportCanvas.getContext('2d');
+        exportCanvas.width = largeCanvas.width + 2 * rulerSize;
+        exportCanvas.height = largeCanvas.height + 2 * rulerSize;
+
+        exportCtx.fillStyle = '#fff';
+        exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+        exportCtx.drawImage(largeCanvas, rulerSize, rulerSize);
+        exportCtx.drawImage(rulerX1Canvas, rulerSize, 0);
+        exportCtx.drawImage(rulerX2Canvas, rulerSize, exportCanvas.height - rulerSize);
+        exportCtx.drawImage(rulerY1Canvas, 0, rulerSize);
+        exportCtx.drawImage(rulerY2Canvas, exportCanvas.width - rulerSize, rulerSize);
+        exportCtx.strokeStyle = '#000';
+        drawExportRulerBorders(exportCtx, exportCanvas.width, exportCanvas.height);
+
+        return exportCanvas;
+    }
+
+    function getPatternDownloadFileName() {
+        if (currentSliceImage) {
+            return 'fuse-bead-pattern-slice-' + (currentSliceImage.y + 1) + '-' + (currentSliceImage.x + 1) + '.png';
+        }
+        return 'fuse-bead-pattern-full-' + fullCanvas.width + 'x' + fullCanvas.height + '.png';
+    }
+
+    function downloadPatternImage() {
+        let exportCanvas = buildExportCanvas();
+        if (!exportCanvas) return;
+
+        let downloadLink = document.createElement('a');
+        downloadLink.download = getPatternDownloadFileName();
+        downloadLink.href = exportCanvas.toDataURL('image/png');
+        document.body.appendChild(downloadLink);
+        downloadLink.click();
+        document.body.removeChild(downloadLink);
     }
 
     //刷新图片（修改显示像素或者替换颜色之后，保持当前视角不变进行刷新）

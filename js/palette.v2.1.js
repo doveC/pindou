@@ -424,6 +424,34 @@ allPalettes.set("nabbi",
     ]
 );
 
+allPalettes.set("gogo-p",
+    [
+        { name: 'P01', color: 'f4f4f2' },
+        { name: 'P02', color: 'b7b7b3' },
+        { name: 'P03', color: 'c9ebb9' },
+        { name: 'P04', color: 'f6a7b1' },
+        { name: 'P05', color: 'e89237' },
+        { name: 'P06', color: '69c99f' },
+        { name: 'P07', color: 'efb989' },
+        { name: 'P08', color: 'efe25a' },
+        { name: 'P09', color: 'f0f0ed' },
+        { name: 'P10', color: 'd9d2e6' },
+        { name: 'P11', color: 'f3ecdc' },
+        { name: 'P12', color: 'eef4f8' },
+        { name: 'P13', color: '8caed8' },
+        { name: 'P14', color: '4f84b6' },
+        { name: 'P15', color: '6a8b83' },
+        { name: 'P16', color: 'f3c354' },
+        { name: 'P17', color: 'efaf4b' },
+        { name: 'P18', color: 'f6cfcd' },
+        { name: 'P19', color: 'e5d9e0' },
+        { name: 'P20', color: 'f0bfd0' },
+        { name: 'P21', color: 'f3d7e4' },
+        { name: 'P22', color: 'dcc0c7' },
+        { name: 'P23', color: 'aa727f' },
+    ]
+);
+
 allPalettes.set("artkal-s",
     [
         { name: 'S01', color: 'ffffff' },

@@ -125,10 +125,10 @@
                     <div class="row">
                         <label class="col-sm-2 col-form-label">目标尺寸：</label>
                         <select id="patternSizeSelect" class="form-control col-sm-4">
-                            <option value="0" selected>原始尺寸</option>
+                            <option value="0">原始尺寸</option>
                             <option value="32">32x32</option>
                             <option value="40">40x40</option>
-                            <option value="50">50x50</option>
+                            <option value="50" selected>50x50</option>
                             <option value="64">64x64</option>
                             <option value="80">80x80</option>
                             <option value="100">100x100</option>
@@ -387,7 +387,7 @@
         dragMinDistance = 8;//拖拽所需的鼠标移动最小距离（像素）
 
     var pieceSize = 40;//单块拼板容纳的拼豆数
-    var targetPatternSize = 0,//目标拼豆图尺寸，0表示保持原始尺寸
+    var targetPatternSize = 50,//目标拼豆图尺寸，默认50x50
         resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
@@ -1044,7 +1044,10 @@
                 let candidateColor = paletteMap.get(candidateHex);
                 if (!sourceColor || !candidateColor) continue;
 
-                let distance = colorDistance(sourceColor.r, sourceColor.g, sourceColor.b, candidateColor.r, candidateColor.g, candidateColor.b);
+                let distance = ciede2000Lab(
+                    sourceColor.labL, sourceColor.labA, sourceColor.labB,
+                    candidateColor.labL, candidateColor.labA, candidateColor.labB
+                );
                 if (distance < nearestColorDistance
                     || (distance == nearestColorDistance && candidateCount > nearestColorCount)) {
                     nearestColorHex = candidateHex;
@@ -1612,10 +1615,14 @@
             return similarColorCache.get(hex);
         }
 
-        let minDistance = 584970;//最小色差值（初始值为纯黑和纯白的色差，使用colorDistance(0,0,0,255,255,255)计算而得）
+        let sourceLab = rgbToLab(r, g, b),
+            minDistance = Number.POSITIVE_INFINITY;
         let minColor = null;//最小值对应的颜色
         for (let color of paletteMap.values()) {
-            let distance = colorDistance(color.r, color.g, color.b, r, g, b);
+            let distance = ciede2000Lab(
+                color.labL, color.labA, color.labB,
+                sourceLab.l, sourceLab.a, sourceLab.b
+            );
             if (distance == 0) {//颜色相等直接返回
                 similarColorCache.set(hex, color);//写入缓存
                 return color;
@@ -1634,12 +1641,16 @@
     function generatePaletteMap(palette) {
         let map = new Map();
         for (let i = 0; i < palette.length; i++) {
-            let rgb = hexToRgb(palette[i].color);
+            let rgb = hexToRgb(palette[i].color),
+                lab = rgbToLab(rgb.r, rgb.g, rgb.b);
             map.set(palette[i].color, {
                 name: palette[i].name,
                 r: rgb.r,
                 g: rgb.g,
-                b: rgb.b
+                b: rgb.b,
+                labL: lab.l,
+                labA: lab.a,
+                labB: lab.b
             });
         }
         return map;
@@ -1701,13 +1712,109 @@
             return null;
     }
 
-    //颜色差别公式，简化版，参考https://stackoverflow.com/a/9085524
-    function colorDistance(r1, g1, b1, r2, g2, b2) {
-        let rmean = (r1 + r2) / 2,
-            rd = r1 - r2,
-            gd = g1 - g2,
-            bd = b1 - b2;
-        return (((512 + rmean) * rd * rd) >> 8) + 4 * gd * gd + (((767 - rmean) * bd * bd) >> 8);
+    function rgbToLab(r, g, b) {
+        let sr = r / 255,
+            sg = g / 255,
+            sb = b / 255,
+            epsilon = 216 / 24389,
+            kappa = 24389 / 27;
+
+        sr = sr <= 0.04045 ? sr / 12.92 : Math.pow((sr + 0.055) / 1.055, 2.4);
+        sg = sg <= 0.04045 ? sg / 12.92 : Math.pow((sg + 0.055) / 1.055, 2.4);
+        sb = sb <= 0.04045 ? sb / 12.92 : Math.pow((sb + 0.055) / 1.055, 2.4);
+
+        let x = (sr * 0.4124564 + sg * 0.3575761 + sb * 0.1804375) / 0.95047,
+            y = (sr * 0.2126729 + sg * 0.7151522 + sb * 0.0721750) / 1.00000,
+            z = (sr * 0.0193339 + sg * 0.1191920 + sb * 0.9503041) / 1.08883;
+
+        let fx = x > epsilon ? Math.cbrt(x) : (kappa * x + 16) / 116,
+            fy = y > epsilon ? Math.cbrt(y) : (kappa * y + 16) / 116,
+            fz = z > epsilon ? Math.cbrt(z) : (kappa * z + 16) / 116;
+
+        return {
+            l: 116 * fy - 16,
+            a: 500 * (fx - fy),
+            b: 200 * (fy - fz)
+        };
+    }
+
+    // CIEDE2000 implementation adapted for this project based on:
+    // https://github.com/michel-leonard/ciede2000-color-matching (public domain)
+    function ciede2000Lab(l1, a1, b1, l2, a2, b2) {
+        let kL = 1,
+            kC = 1,
+            kH = 1,
+            pow25To7 = 6103515625,
+            c1 = Math.sqrt(a1 * a1 + b1 * b1),
+            c2 = Math.sqrt(a2 * a2 + b2 * b2),
+            cBar = (c1 + c2) / 2,
+            g = 0.5 * (1 - Math.sqrt(Math.pow(cBar, 7) / (Math.pow(cBar, 7) + pow25To7))),
+            a1Prime = (1 + g) * a1,
+            a2Prime = (1 + g) * a2,
+            c1Prime = Math.sqrt(a1Prime * a1Prime + b1 * b1),
+            c2Prime = Math.sqrt(a2Prime * a2Prime + b2 * b2),
+            h1Prime = Math.atan2(b1, a1Prime),
+            h2Prime = Math.atan2(b2, a2Prime),
+            pi2 = 2 * Math.PI;
+
+        if (h1Prime < 0) h1Prime += pi2;
+        if (h2Prime < 0) h2Prime += pi2;
+
+        let deltaLPrime = l2 - l1,
+            deltaCPrime = c2Prime - c1Prime,
+            deltahPrime = 0;
+
+        if (c1Prime * c2Prime !== 0) {
+            if (Math.abs(h2Prime - h1Prime) <= Math.PI) {
+                deltahPrime = h2Prime - h1Prime;
+            }
+            else if (h2Prime <= h1Prime) {
+                deltahPrime = h2Prime - h1Prime + pi2;
+            }
+            else {
+                deltahPrime = h2Prime - h1Prime - pi2;
+            }
+        }
+
+        let deltaHPrime = 2 * Math.sqrt(c1Prime * c2Prime) * Math.sin(deltahPrime / 2),
+            lBarPrime = (l1 + l2) / 2,
+            cBarPrime = (c1Prime + c2Prime) / 2,
+            hBarPrime = h1Prime + h2Prime;
+
+        if (c1Prime * c2Prime === 0) {
+            hBarPrime = h1Prime + h2Prime;
+        }
+        else if (Math.abs(h1Prime - h2Prime) <= Math.PI) {
+            hBarPrime = (h1Prime + h2Prime) / 2;
+        }
+        else if (h1Prime + h2Prime < pi2) {
+            hBarPrime = (h1Prime + h2Prime + pi2) / 2;
+        }
+        else {
+            hBarPrime = (h1Prime + h2Prime - pi2) / 2;
+        }
+
+        let t = 1
+            - 0.17 * Math.cos(hBarPrime - Math.PI / 6)
+            + 0.24 * Math.cos(2 * hBarPrime)
+            + 0.32 * Math.cos(3 * hBarPrime + Math.PI / 30)
+            - 0.20 * Math.cos(4 * hBarPrime - 63 * Math.PI / 180),
+            deltaTheta = (Math.PI / 6) * Math.exp(-Math.pow((hBarPrime - 275 * Math.PI / 180) / (25 * Math.PI / 180), 2)),
+            rC = 2 * Math.sqrt(Math.pow(cBarPrime, 7) / (Math.pow(cBarPrime, 7) + pow25To7)),
+            sL = 1 + (0.015 * Math.pow(lBarPrime - 50, 2)) / Math.sqrt(20 + Math.pow(lBarPrime - 50, 2)),
+            sC = 1 + 0.045 * cBarPrime,
+            sH = 1 + 0.015 * cBarPrime * t,
+            rT = -Math.sin(2 * deltaTheta) * rC,
+            lightnessTerm = deltaLPrime / (kL * sL),
+            chromaTerm = deltaCPrime / (kC * sC),
+            hueTerm = deltaHPrime / (kH * sH);
+
+        return Math.sqrt(
+            lightnessTerm * lightnessTerm
+            + chromaTerm * chromaTerm
+            + hueTerm * hueTerm
+            + rT * chromaTerm * hueTerm
+        );
     }
 
     //使canvas的尺寸与屏幕大小一致并且不超过当前大图尺寸

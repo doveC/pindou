@@ -157,8 +157,8 @@
                     <div class="row">
                         <label class="col-sm-2 col-form-label">图像简化：</label>
                         <select id="preSimplifySelect" class="form-control col-sm-4">
-                            <option value="off">关闭</option>
-                            <option value="light" selected>轻度</option>
+                            <option value="off" selected>关闭</option>
+                            <option value="light">轻度</option>
                             <option value="medium">中度</option>
                             <option value="strong">强力</option>
                         </select>
@@ -168,8 +168,8 @@
                     <div class="row">
                         <label class="col-sm-2 col-form-label">轮廓强化：</label>
                         <select id="outlineEnhanceSelect" class="form-control col-sm-4">
-                            <option value="off">关闭</option>
-                            <option value="light" selected>轻度</option>
+                            <option value="off" selected>关闭</option>
+                            <option value="light">轻度</option>
                             <option value="medium">中度</option>
                             <option value="strong">强力</option>
                         </select>
@@ -179,9 +179,9 @@
                     <div class="row">
                         <label class="col-sm-2 col-form-label">碎块清理：</label>
                         <select id="regionCleanupSelect" class="form-control col-sm-4">
-                            <option value="0">关闭</option>
+                            <option value="0" selected>关闭</option>
                             <option value="1">仅清理单像素</option>
-                            <option value="3" selected>清理3像素及以下</option>
+                            <option value="3">清理3像素及以下</option>
                             <option value="5">清理5像素及以下</option>
                             <option value="8">清理8像素及以下</option>
                         </select>
@@ -433,9 +433,9 @@
     var targetPatternSize = 50,//目标拼豆图尺寸，默认50x50
         resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
         subjectCropMode = 'subject',//构图优化：主体优先
-        preSimplifyMode = 'light',//图像简化
-        outlineEnhanceMode = 'light',//轮廓强化
-        regionCleanupLimit = 3,//小碎块清理阈值
+        preSimplifyMode = 'off',//图像简化
+        outlineEnhanceMode = 'off',//轮廓强化
+        regionCleanupLimit = 0,//小碎块清理阈值
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象

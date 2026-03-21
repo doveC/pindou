@@ -166,6 +166,17 @@
                 </div>
                 <div class="form-group">
                     <div class="row">
+                        <label class="col-sm-2 col-form-label">轮廓强化：</label>
+                        <select id="outlineEnhanceSelect" class="form-control col-sm-4">
+                            <option value="off">关闭</option>
+                            <option value="light" selected>轻度</option>
+                            <option value="medium">中度</option>
+                            <option value="strong">强力</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
                         <label class="col-sm-2 col-form-label">颜色优化：</label>
                         <select id="colorLimitSelect" class="form-control col-sm-4">
                             <option value="0" selected>保留全部颜色</option>
@@ -411,6 +422,7 @@
         resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
         subjectCropMode = 'subject',//构图优化：主体优先
         preSimplifyMode = 'light',//图像简化
+        outlineEnhanceMode = 'light',//轮廓强化
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象
@@ -545,6 +557,14 @@
             //图像简化变化
             $('#preSimplifySelect').change(function (e) {
                 preSimplifyMode = this.value || 'off';
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //轮廓强化变化
+            $('#outlineEnhanceSelect').change(function (e) {
+                outlineEnhanceMode = this.value || 'off';
                 if (uploadedImage) {
                     processUploadedImage();
                 }
@@ -884,7 +904,8 @@
         trimCanvas(tempCanvas);
         tempCanvas = cropCanvasForSubject(tempCanvas);
         tempCanvas = resizeCanvasForBeads(tempCanvas);
-        return simplifySourceCanvas(tempCanvas);
+        tempCanvas = simplifySourceCanvas(tempCanvas);
+        return enhanceOutlineCanvas(tempCanvas);
     }
 
     function copyCanvas(sourceCanvas, destCanvas) {
@@ -1171,6 +1192,75 @@
         simplifiedCanvas.height = sourceCanvas.height;
         simplifiedCtx.putImageData(simplifiedImageData, 0, 0);
         return simplifiedCanvas;
+    }
+
+    function getOutlineEnhanceConfig() {
+        if (outlineEnhanceMode == 'strong') {
+            return { threshold: 42, factor: 0.62, bias: 6 };
+        }
+        if (outlineEnhanceMode == 'medium') {
+            return { threshold: 34, factor: 0.72, bias: 4 };
+        }
+        if (outlineEnhanceMode == 'light') {
+            return { threshold: 26, factor: 0.82, bias: 2 };
+        }
+        return null;
+    }
+
+    function getPixelLuminance(data, cursor) {
+        return 0.299 * data[cursor] + 0.587 * data[cursor + 1] + 0.114 * data[cursor + 2];
+    }
+
+    function enhanceOutlineCanvas(sourceCanvas) {
+        let config = getOutlineEnhanceConfig();
+        if (!config) return sourceCanvas;
+
+        let sourceCtx = sourceCanvas.getContext('2d'),
+            imageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height),
+            source = imageData.data,
+            target = new Uint8ClampedArray(source),
+            width = imageData.width,
+            height = imageData.height;
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let cursor = (y * width + x) * 4;
+                if (source[cursor + 3] === 0) continue;
+
+                let currentLum = getPixelLuminance(source, cursor),
+                    strongestEdge = 0,
+                    neighborLumSum = 0,
+                    neighborCount = 0;
+
+                for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1); ny++) {
+                    for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx++) {
+                        if (nx === x && ny === y) continue;
+                        let neighborCursor = (ny * width + nx) * 4;
+                        if (source[neighborCursor + 3] === 0) continue;
+                        let neighborLum = getPixelLuminance(source, neighborCursor);
+                        strongestEdge = Math.max(strongestEdge, Math.abs(currentLum - neighborLum));
+                        neighborLumSum += neighborLum;
+                        neighborCount++;
+                    }
+                }
+
+                if (neighborCount === 0) continue;
+
+                let neighborLumAverage = neighborLumSum / neighborCount;
+                if (strongestEdge >= config.threshold && currentLum + 6 < neighborLumAverage) {
+                    target[cursor] = Math.max(0, Math.round(source[cursor] * config.factor) - config.bias);
+                    target[cursor + 1] = Math.max(0, Math.round(source[cursor + 1] * config.factor) - config.bias);
+                    target[cursor + 2] = Math.max(0, Math.round(source[cursor + 2] * config.factor) - config.bias);
+                }
+            }
+        }
+
+        let enhancedCanvas = document.createElement('canvas'),
+            enhancedCtx = enhancedCanvas.getContext('2d');
+        enhancedCanvas.width = sourceCanvas.width;
+        enhancedCanvas.height = sourceCanvas.height;
+        enhancedCtx.putImageData(new ImageData(target, width, height), 0, 0);
+        return enhancedCanvas;
     }
 
     function resizeCanvasForBeads(sourceCanvas) {

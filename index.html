@@ -177,6 +177,18 @@
                 </div>
                 <div class="form-group">
                     <div class="row">
+                        <label class="col-sm-2 col-form-label">碎块清理：</label>
+                        <select id="regionCleanupSelect" class="form-control col-sm-4">
+                            <option value="0">关闭</option>
+                            <option value="1">仅清理单像素</option>
+                            <option value="3" selected>清理3像素及以下</option>
+                            <option value="5">清理5像素及以下</option>
+                            <option value="8">清理8像素及以下</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
                         <label class="col-sm-2 col-form-label">颜色优化：</label>
                         <select id="colorLimitSelect" class="form-control col-sm-4">
                             <option value="0" selected>保留全部颜色</option>
@@ -423,6 +435,7 @@
         subjectCropMode = 'subject',//构图优化：主体优先
         preSimplifyMode = 'light',//图像简化
         outlineEnhanceMode = 'light',//轮廓强化
+        regionCleanupLimit = 3,//小碎块清理阈值
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象
@@ -565,6 +578,14 @@
             //轮廓强化变化
             $('#outlineEnhanceSelect').change(function (e) {
                 outlineEnhanceMode = this.value || 'off';
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //碎块清理变化
+            $('#regionCleanupSelect').change(function (e) {
+                regionCleanupLimit = parseInt(this.value) || 0;
                 if (uploadedImage) {
                     processUploadedImage();
                 }
@@ -1194,6 +1215,101 @@
         return simplifiedCanvas;
     }
 
+    function getImageDataColorHex(imageData, x, y) {
+        let cursor = (y * imageData.width + x) * 4;
+        if (imageData.data[cursor + 3] === 0) return null;
+        return rgbToHex(imageData.data[cursor], imageData.data[cursor + 1], imageData.data[cursor + 2]);
+    }
+
+    function setImageDataColorHex(imageData, x, y, hex) {
+        let rgb = hexToRgb(hex),
+            cursor = (y * imageData.width + x) * 4;
+        imageData.data[cursor] = rgb.r;
+        imageData.data[cursor + 1] = rgb.g;
+        imageData.data[cursor + 2] = rgb.b;
+        imageData.data[cursor + 3] = 255;
+    }
+
+    function cleanupSmallRegions(imageData) {
+        if (!regionCleanupLimit) return;
+
+        let width = imageData.width,
+            height = imageData.height,
+            visited = new Uint8Array(width * height),
+            directions = [
+                { x: -1, y: -1 }, { x: 0, y: -1 }, { x: 1, y: -1 },
+                { x: -1, y: 0 }, { x: 1, y: 0 },
+                { x: -1, y: 1 }, { x: 0, y: 1 }, { x: 1, y: 1 }
+            ];
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let index = y * width + x;
+                if (visited[index]) continue;
+
+                let sourceHex = getImageDataColorHex(imageData, x, y);
+                visited[index] = 1;
+                if (!sourceHex) continue;
+
+                let stack = [{ x: x, y: y }],
+                    regionPixels = [],
+                    neighborColors = new Map(),
+                    sourceColor = paletteMap.get(sourceHex);
+
+                while (stack.length > 0) {
+                    let point = stack.pop();
+                    regionPixels.push(point);
+
+                    for (let direction of directions) {
+                        let nx = point.x + direction.x,
+                            ny = point.y + direction.y;
+                        if (nx < 0 || ny < 0 || nx >= width || ny >= height) continue;
+
+                        let neighborIndex = ny * width + nx,
+                            neighborHex = getImageDataColorHex(imageData, nx, ny);
+                        if (!neighborHex) continue;
+
+                        if (neighborHex == sourceHex) {
+                            if (!visited[neighborIndex]) {
+                                visited[neighborIndex] = 1;
+                                stack.push({ x: nx, y: ny });
+                            }
+                        }
+                        else {
+                            neighborColors.set(neighborHex, (neighborColors.get(neighborHex) || 0) + 1);
+                        }
+                    }
+                }
+
+                if (regionPixels.length > regionCleanupLimit || neighborColors.size === 0 || !sourceColor) continue;
+
+                let bestNeighborHex = null,
+                    bestTouchCount = -1,
+                    bestDistance = Number.POSITIVE_INFINITY;
+                for (let [neighborHex, touchCount] of neighborColors) {
+                    let candidateColor = paletteMap.get(neighborHex);
+                    if (!candidateColor) continue;
+
+                    let distance = ciede2000Lab(
+                        sourceColor.labL, sourceColor.labA, sourceColor.labB,
+                        candidateColor.labL, candidateColor.labA, candidateColor.labB
+                    );
+                    if (touchCount > bestTouchCount
+                        || (touchCount == bestTouchCount && distance < bestDistance)) {
+                        bestNeighborHex = neighborHex;
+                        bestTouchCount = touchCount;
+                        bestDistance = distance;
+                    }
+                }
+
+                if (!bestNeighborHex) continue;
+                for (let pixel of regionPixels) {
+                    setImageDataColorHex(imageData, pixel.x, pixel.y, bestNeighborHex);
+                }
+            }
+        }
+    }
+
     function getOutlineEnhanceConfig() {
         if (outlineEnhanceMode == 'strong') {
             return { threshold: 42, factor: 0.62, bias: 6 };
@@ -1386,6 +1502,7 @@
         }
 
         applyAutoColorLimit(imageData);
+        cleanupSmallRegions(imageData);
 
         //保存换色后的原图
         paletteImageData = imageData;

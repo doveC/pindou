@@ -146,6 +146,15 @@
                 </div>
                 <div class="form-group">
                     <div class="row">
+                        <label class="col-sm-2 col-form-label">构图优化：</label>
+                        <select id="subjectCropSelect" class="form-control col-sm-4">
+                            <option value="off">关闭</option>
+                            <option value="subject" selected>主体优先</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
                         <label class="col-sm-2 col-form-label">颜色优化：</label>
                         <select id="colorLimitSelect" class="form-control col-sm-4">
                             <option value="0" selected>保留全部颜色</option>
@@ -389,6 +398,7 @@
     var pieceSize = 40;//单块拼板容纳的拼豆数
     var targetPatternSize = 50,//目标拼豆图尺寸，默认50x50
         resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
+        subjectCropMode = 'subject',//构图优化：主体优先
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象
@@ -507,6 +517,14 @@
             //缩放方式变化
             $('#resizeModeSelect').change(function (e) {
                 resizeMode = this.value || 'fit';
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //构图优化变化
+            $('#subjectCropSelect').change(function (e) {
+                subjectCropMode = this.value || 'off';
                 if (uploadedImage) {
                     processUploadedImage();
                 }
@@ -844,6 +862,7 @@
         tempCtx.drawImage(image, 0, 0);
 
         trimCanvas(tempCanvas);
+        tempCanvas = cropCanvasForSubject(tempCanvas);
         return resizeCanvasForBeads(tempCanvas);
     }
 
@@ -852,6 +871,144 @@
         destCanvas.height = sourceCanvas.height;
         let destCtx = destCanvas.getContext('2d');
         destCtx.drawImage(sourceCanvas, 0, 0);
+    }
+
+    function cropCanvasToRect(sourceCanvas, rect) {
+        if (!rect) return sourceCanvas;
+
+        let width = Math.max(1, rect.right - rect.left + 1),
+            height = Math.max(1, rect.bottom - rect.top + 1),
+            sourceCtx = sourceCanvas.getContext('2d'),
+            croppedCanvas = document.createElement('canvas'),
+            croppedCtx = croppedCanvas.getContext('2d');
+
+        croppedCanvas.width = width;
+        croppedCanvas.height = height;
+        croppedCtx.putImageData(sourceCtx.getImageData(rect.left, rect.top, width, height), 0, 0);
+        return croppedCanvas;
+    }
+
+    function createAnalysisCanvas(sourceCanvas, maxSide) {
+        let scale = Math.min(1, maxSide / Math.max(sourceCanvas.width, sourceCanvas.height)),
+            analysisCanvas = document.createElement('canvas'),
+            analysisCtx = analysisCanvas.getContext('2d');
+
+        analysisCanvas.width = Math.max(1, Math.round(sourceCanvas.width * scale));
+        analysisCanvas.height = Math.max(1, Math.round(sourceCanvas.height * scale));
+        analysisCtx.drawImage(sourceCanvas, 0, 0, analysisCanvas.width, analysisCanvas.height);
+
+        return {
+            canvas: analysisCanvas,
+            scale: scale
+        };
+    }
+
+    function getSubjectCropRect(sourceCanvas) {
+        let analysis = createAnalysisCanvas(sourceCanvas, 256),
+            analysisCanvas = analysis.canvas,
+            analysisCtx = analysisCanvas.getContext('2d'),
+            imageData = analysisCtx.getImageData(0, 0, analysisCanvas.width, analysisCanvas.height),
+            data = imageData.data,
+            width = analysisCanvas.width,
+            height = analysisCanvas.height,
+            borderR = 0,
+            borderG = 0,
+            borderB = 0,
+            borderSampleCount = 0;
+
+        for (let x = 0; x < width; x++) {
+            accumulateBorderPixel(0, x);
+            if (height > 1) accumulateBorderPixel(height - 1, x);
+        }
+        for (let y = 1; y < height - 1; y++) {
+            accumulateBorderPixel(y, 0);
+            if (width > 1) accumulateBorderPixel(y, width - 1);
+        }
+
+        if (borderSampleCount === 0) return null;
+
+        let averageBorderR = borderR / borderSampleCount,
+            averageBorderG = borderG / borderSampleCount,
+            averageBorderB = borderB / borderSampleCount,
+            bound = {
+                left: width,
+                top: height,
+                right: -1,
+                bottom: -1
+            };
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let cursor = (y * width + x) * 4,
+                    alpha = data[cursor + 3];
+                if (alpha === 0) continue;
+
+                let r = data[cursor],
+                    g = data[cursor + 1],
+                    b = data[cursor + 2],
+                    borderDiff = Math.abs(r - averageBorderR) + Math.abs(g - averageBorderG) + Math.abs(b - averageBorderB),
+                    edgeDiff = 0;
+
+                if (x + 1 < width) {
+                    let rightCursor = cursor + 4;
+                    edgeDiff = Math.max(
+                        edgeDiff,
+                        Math.abs(r - data[rightCursor]) + Math.abs(g - data[rightCursor + 1]) + Math.abs(b - data[rightCursor + 2])
+                    );
+                }
+                if (y + 1 < height) {
+                    let downCursor = cursor + width * 4;
+                    edgeDiff = Math.max(
+                        edgeDiff,
+                        Math.abs(r - data[downCursor]) + Math.abs(g - data[downCursor + 1]) + Math.abs(b - data[downCursor + 2])
+                    );
+                }
+
+                if (borderDiff >= 42 || edgeDiff >= 36) {
+                    if (x < bound.left) bound.left = x;
+                    if (x > bound.right) bound.right = x;
+                    if (y < bound.top) bound.top = y;
+                    if (y > bound.bottom) bound.bottom = y;
+                }
+            }
+        }
+
+        if (bound.right < bound.left || bound.bottom < bound.top) return null;
+
+        let padX = Math.max(2, Math.round((bound.right - bound.left + 1) * 0.12)),
+            padY = Math.max(2, Math.round((bound.bottom - bound.top + 1) * 0.12));
+        bound.left = Math.max(0, bound.left - padX);
+        bound.right = Math.min(width - 1, bound.right + padX);
+        bound.top = Math.max(0, bound.top - padY);
+        bound.bottom = Math.min(height - 1, bound.bottom + padY);
+
+        if ((bound.right - bound.left + 1) * (bound.bottom - bound.top + 1) < width * height * 0.08) {
+            return null;
+        }
+
+        return {
+            left: Math.max(0, Math.floor(bound.left / analysis.scale)),
+            top: Math.max(0, Math.floor(bound.top / analysis.scale)),
+            right: Math.min(sourceCanvas.width - 1, Math.ceil((bound.right + 1) / analysis.scale) - 1),
+            bottom: Math.min(sourceCanvas.height - 1, Math.ceil((bound.bottom + 1) / analysis.scale) - 1)
+        };
+
+        function accumulateBorderPixel(y, x) {
+            let cursor = (y * width + x) * 4;
+            if (data[cursor + 3] === 0) return;
+            borderR += data[cursor];
+            borderG += data[cursor + 1];
+            borderB += data[cursor + 2];
+            borderSampleCount++;
+        }
+    }
+
+    function cropCanvasForSubject(sourceCanvas) {
+        if (subjectCropMode != 'subject') return sourceCanvas;
+
+        let rect = getSubjectCropRect(sourceCanvas);
+        if (!rect) return sourceCanvas;
+        return cropCanvasToRect(sourceCanvas, rect);
     }
 
     function resizeCanvasForBeads(sourceCanvas) {

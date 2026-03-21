@@ -155,6 +155,17 @@
                 </div>
                 <div class="form-group">
                     <div class="row">
+                        <label class="col-sm-2 col-form-label">图像简化：</label>
+                        <select id="preSimplifySelect" class="form-control col-sm-4">
+                            <option value="off">关闭</option>
+                            <option value="light" selected>轻度</option>
+                            <option value="medium">中度</option>
+                            <option value="strong">强力</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="form-group">
+                    <div class="row">
                         <label class="col-sm-2 col-form-label">颜色优化：</label>
                         <select id="colorLimitSelect" class="form-control col-sm-4">
                             <option value="0" selected>保留全部颜色</option>
@@ -399,6 +410,7 @@
     var targetPatternSize = 50,//目标拼豆图尺寸，默认50x50
         resizeMode = 'fit',//缩放方式：fit等比适配，stretch强制尺寸
         subjectCropMode = 'subject',//构图优化：主体优先
+        preSimplifyMode = 'light',//图像简化
         autoColorLimit = 0;//自动减色后的最大颜色数，0表示不限制
 
     var paletteMap = generatePaletteMap(allPalettes.get("mard")),//调色板对象
@@ -525,6 +537,14 @@
             //构图优化变化
             $('#subjectCropSelect').change(function (e) {
                 subjectCropMode = this.value || 'off';
+                if (uploadedImage) {
+                    processUploadedImage();
+                }
+            });
+
+            //图像简化变化
+            $('#preSimplifySelect').change(function (e) {
+                preSimplifyMode = this.value || 'off';
                 if (uploadedImage) {
                     processUploadedImage();
                 }
@@ -863,7 +883,8 @@
 
         trimCanvas(tempCanvas);
         tempCanvas = cropCanvasForSubject(tempCanvas);
-        return resizeCanvasForBeads(tempCanvas);
+        tempCanvas = resizeCanvasForBeads(tempCanvas);
+        return simplifySourceCanvas(tempCanvas);
     }
 
     function copyCanvas(sourceCanvas, destCanvas) {
@@ -1009,6 +1030,147 @@
         let rect = getSubjectCropRect(sourceCanvas);
         if (!rect) return sourceCanvas;
         return cropCanvasToRect(sourceCanvas, rect);
+    }
+
+    function getSimplifyConfig() {
+        if (preSimplifyMode == 'strong') {
+            return { radius: 2, threshold: 120, levels: 4, passes: 2, majoritySupport: 4 };
+        }
+        if (preSimplifyMode == 'medium') {
+            return { radius: 1, threshold: 96, levels: 5, passes: 2, majoritySupport: 4 };
+        }
+        if (preSimplifyMode == 'light') {
+            return { radius: 1, threshold: 72, levels: 6, passes: 1, majoritySupport: 5 };
+        }
+        return null;
+    }
+
+    function edgeAwareSmoothImageData(imageData, radius, threshold) {
+        let width = imageData.width,
+            height = imageData.height,
+            source = imageData.data,
+            target = new Uint8ClampedArray(source.length);
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let cursor = (y * width + x) * 4,
+                    centerR = source[cursor],
+                    centerG = source[cursor + 1],
+                    centerB = source[cursor + 2],
+                    centerA = source[cursor + 3],
+                    sumR = 0,
+                    sumG = 0,
+                    sumB = 0,
+                    count = 0;
+
+                if (centerA === 0) {
+                    target[cursor + 3] = 0;
+                    continue;
+                }
+
+                for (let ny = Math.max(0, y - radius); ny <= Math.min(height - 1, y + radius); ny++) {
+                    for (let nx = Math.max(0, x - radius); nx <= Math.min(width - 1, x + radius); nx++) {
+                        let neighborCursor = (ny * width + nx) * 4,
+                            neighborA = source[neighborCursor + 3];
+                        if (neighborA === 0) continue;
+
+                        let diff = Math.abs(centerR - source[neighborCursor])
+                            + Math.abs(centerG - source[neighborCursor + 1])
+                            + Math.abs(centerB - source[neighborCursor + 2]);
+                        if (diff <= threshold || (nx === x && ny === y)) {
+                            sumR += source[neighborCursor];
+                            sumG += source[neighborCursor + 1];
+                            sumB += source[neighborCursor + 2];
+                            count++;
+                        }
+                    }
+                }
+
+                target[cursor] = Math.round(sumR / count);
+                target[cursor + 1] = Math.round(sumG / count);
+                target[cursor + 2] = Math.round(sumB / count);
+                target[cursor + 3] = centerA;
+            }
+        }
+
+        return new ImageData(target, width, height);
+    }
+
+    function posterizeImageData(imageData, levels) {
+        let data = imageData.data,
+            step = 255 / Math.max(1, levels - 1);
+        for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] === 0) continue;
+            data[i] = Math.round(data[i] / step) * step;
+            data[i + 1] = Math.round(data[i + 1] / step) * step;
+            data[i + 2] = Math.round(data[i + 2] / step) * step;
+        }
+        return imageData;
+    }
+
+    function applyMajorityColorPass(imageData, minSupport) {
+        let width = imageData.width,
+            height = imageData.height,
+            source = imageData.data,
+            target = new Uint8ClampedArray(source);
+
+        for (let y = 0; y < height; y++) {
+            for (let x = 0; x < width; x++) {
+                let colorCount = new Map(),
+                    cursor = (y * width + x) * 4;
+                if (source[cursor + 3] === 0) continue;
+
+                for (let ny = Math.max(0, y - 1); ny <= Math.min(height - 1, y + 1); ny++) {
+                    for (let nx = Math.max(0, x - 1); nx <= Math.min(width - 1, x + 1); nx++) {
+                        let neighborCursor = (ny * width + nx) * 4;
+                        if (source[neighborCursor + 3] === 0) continue;
+                        let key = rgbToHex(source[neighborCursor], source[neighborCursor + 1], source[neighborCursor + 2]);
+                        colorCount.set(key, (colorCount.get(key) || 0) + 1);
+                    }
+                }
+
+                let bestColor = null,
+                    bestCount = 0;
+                for (let [hex, count] of colorCount) {
+                    if (count > bestCount) {
+                        bestColor = hex;
+                        bestCount = count;
+                    }
+                }
+
+                if (bestColor && bestCount >= minSupport) {
+                    let rgb = hexToRgb(bestColor);
+                    target[cursor] = rgb.r;
+                    target[cursor + 1] = rgb.g;
+                    target[cursor + 2] = rgb.b;
+                }
+            }
+        }
+
+        return new ImageData(target, width, height);
+    }
+
+    function simplifySourceCanvas(sourceCanvas) {
+        let config = getSimplifyConfig();
+        if (!config) return sourceCanvas;
+
+        let sourceCtx = sourceCanvas.getContext('2d'),
+            imageData = sourceCtx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height),
+            simplifiedImageData = imageData;
+
+        for (let i = 0; i < config.passes; i++) {
+            simplifiedImageData = edgeAwareSmoothImageData(simplifiedImageData, config.radius, config.threshold);
+        }
+
+        simplifiedImageData = posterizeImageData(simplifiedImageData, config.levels);
+        simplifiedImageData = applyMajorityColorPass(simplifiedImageData, config.majoritySupport);
+
+        let simplifiedCanvas = document.createElement('canvas'),
+            simplifiedCtx = simplifiedCanvas.getContext('2d');
+        simplifiedCanvas.width = sourceCanvas.width;
+        simplifiedCanvas.height = sourceCanvas.height;
+        simplifiedCtx.putImageData(simplifiedImageData, 0, 0);
+        return simplifiedCanvas;
     }
 
     function resizeCanvasForBeads(sourceCanvas) {
